@@ -71,7 +71,8 @@ namespace MCPForUnity.Editor.Helpers
         }
 
         /// <summary>
-        /// Syncs all Python tools from all PythonToolsAsset instances to the MCP server
+        /// Syncs all Python tools from all PythonToolsAsset instances to the MCP server.
+        /// Syncs to the INSTALLED folder where the MCP server actually runs from.
         /// </summary>
         public static void SyncAllTools()
         {
@@ -85,29 +86,55 @@ namespace MCPForUnity.Editor.Helpers
             _isSyncing = true;
             try
             {
-                if (!ServerPathResolver.TryFindEmbeddedServerSource(out string srcPath))
+                // Primary: Sync to INSTALLED folder (where MCP server actually runs)
+                string installedPath = ServerInstaller.GetServerPath();
+                if (!string.IsNullOrEmpty(installedPath) && Directory.Exists(installedPath))
                 {
-                    McpLog.Warn("Cannot sync Python tools: MCP server source not found");
-                    return;
-                }
+                    string installedToolsDir = Path.Combine(installedPath, "tools", "custom");
+                    var result = MCPServiceLocator.ToolSync.SyncProjectTools(installedToolsDir);
 
-                string toolsDir = Path.Combine(srcPath, "tools", "custom");
-
-                var result = MCPServiceLocator.ToolSync.SyncProjectTools(toolsDir);
-
-                if (result.Success)
-                {
-                    if (result.CopiedCount > 0 || result.SkippedCount > 0)
+                    if (result.Success)
                     {
-                        McpLog.Info($"Python tools synced: {result.CopiedCount} copied, {result.SkippedCount} skipped");
+                        if (result.CopiedCount > 0 || result.SkippedCount > 0)
+                        {
+                            McpLog.Info($"Python tools synced to installed server: {result.CopiedCount} copied, {result.SkippedCount} skipped");
+                        }
+                    }
+                    else
+                    {
+                        McpLog.Error($"Python tool sync failed with {result.ErrorCount} errors");
+                        foreach (var msg in result.Messages)
+                        {
+                            McpLog.Error($"  - {msg}");
+                        }
                     }
                 }
                 else
                 {
-                    McpLog.Error($"Python tool sync failed with {result.ErrorCount} errors");
-                    foreach (var msg in result.Messages)
+                    // Fallback: Sync to embedded folder if installed not available
+                    if (!ServerPathResolver.TryFindEmbeddedServerSource(out string srcPath))
                     {
-                        McpLog.Error($"  - {msg}");
+                        McpLog.Warn("Cannot sync Python tools: No server path found (neither installed nor embedded)");
+                        return;
+                    }
+
+                    string toolsDir = Path.Combine(srcPath, "tools", "custom");
+                    var result = MCPServiceLocator.ToolSync.SyncProjectTools(toolsDir);
+
+                    if (result.Success)
+                    {
+                        if (result.CopiedCount > 0 || result.SkippedCount > 0)
+                        {
+                            McpLog.Info($"Python tools synced to embedded server: {result.CopiedCount} copied, {result.SkippedCount} skipped");
+                        }
+                    }
+                    else
+                    {
+                        McpLog.Error($"Python tool sync failed with {result.ErrorCount} errors");
+                        foreach (var msg in result.Messages)
+                        {
+                            McpLog.Error($"  - {msg}");
+                        }
                     }
                 }
             }
